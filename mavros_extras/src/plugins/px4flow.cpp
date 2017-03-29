@@ -18,6 +18,7 @@
 
 #include <mavros/mavros_plugin.h>
 
+#include <mavros_msgs/OpticalFlow.h>
 #include <mavros_msgs/OpticalFlowRad.h>
 #include <sensor_msgs/Temperature.h>
 #include <sensor_msgs/Range.h>
@@ -49,6 +50,7 @@ public:
 		flow_nh.param("ranger_min_range", ranger_min_range, 0.3);
 		flow_nh.param("ranger_max_range", ranger_max_range, 5.0);
 
+		flow_pub = flow_nh.advertise<mavros_msgs::OpticalFlow>("raw/optical_flow", 10);
 		flow_rad_pub = flow_nh.advertise<mavros_msgs::OpticalFlowRad>("raw/optical_flow_rad", 10);
 		range_pub = flow_nh.advertise<sensor_msgs::Range>("ground_distance", 10);
 		temp_pub = flow_nh.advertise<sensor_msgs::Temperature>("temperature", 10);
@@ -57,6 +59,7 @@ public:
 	Subscriptions get_subscriptions()
 	{
 		return {
+			       make_handler(&PX4FlowPlugin::handle_optical_flow),
 			       make_handler(&PX4FlowPlugin::handle_optical_flow_rad)
 		};
 	}
@@ -70,9 +73,43 @@ private:
 	double ranger_min_range;
 	double ranger_max_range;
 
+	ros::Publisher flow_pub;
 	ros::Publisher flow_rad_pub;
 	ros::Publisher range_pub;
 	ros::Publisher temp_pub;
+
+	void handle_optical_flow(const mavlink::mavlink_message_t *msg, mavlink::common::msg::OPTICAL_FLOW &flow)
+	{
+		auto header = m_uas->synchronized_header(frame_id, flow.time_usec);
+
+		/**
+		 * Raw message with axes mapped to ROS conventions.
+		 */
+		auto comp_xy = ftf::transform_frame_aircraft_baselink(
+			Eigen::Vector3d(
+				flow.flow_comp_m_x,
+				flow.flow_comp_m_y,
+				0.0));
+
+		auto flow_msg = boost::make_shared<mavros_msgs::OpticalFlow>();
+
+		flow_msg->header = header;
+
+		/**
+		 * Raw message (no transform for int)
+		 *
+		 */
+		flow_msg->flow_x = flow.flow_x;
+		flow_msg->flow_y = flow.flow_y;
+
+		flow_msg->flow_comp_m_x = comp_xy.x();
+		flow_msg->flow_comp_m_y = comp_xy.y();
+
+		flow_msg->quality = flow.quality;
+		flow_msg->ground_distance = flow.ground_distance;
+
+		flow_pub.publish(flow_msg);
+	}
 
 	void handle_optical_flow_rad(const mavlink::mavlink_message_t *msg, mavlink::common::msg::OPTICAL_FLOW_RAD &flow_rad)
 	{
