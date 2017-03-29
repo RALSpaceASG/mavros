@@ -22,6 +22,7 @@ add_message_files(
   HomePosition.msg
   ManualControl.msg
   Mavlink.msg
+  OpticalFlow.msg
   OpticalFlowRad.msg
   OverrideRCIn.msg
   ParamValue.msg
