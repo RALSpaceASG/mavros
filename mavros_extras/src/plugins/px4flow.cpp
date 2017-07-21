@@ -22,6 +22,7 @@
 #include <mavros_msgs/OpticalFlowRad.h>
 #include <sensor_msgs/Temperature.h>
 #include <sensor_msgs/Range.h>
+#include <geometry_msgs/TwistWithCovarianceStamped.h>
 
 namespace mavros {
 namespace extra_plugins{
@@ -50,6 +51,7 @@ public:
 		flow_nh.param("ranger_min_range", ranger_min_range, 0.3);
 		flow_nh.param("ranger_max_range", ranger_max_range, 5.0);
 
+		twist_pub = flow_nh.advertise<geometry_msgs::TwistWithCovarianceStamped>("twist", 10);
 		flow_pub = flow_nh.advertise<mavros_msgs::OpticalFlow>("raw/optical_flow", 10);
 		flow_rad_pub = flow_nh.advertise<mavros_msgs::OpticalFlowRad>("raw/optical_flow_rad", 10);
 		range_pub = flow_nh.advertise<sensor_msgs::Range>("ground_distance", 10);
@@ -73,10 +75,29 @@ private:
 	double ranger_min_range;
 	double ranger_max_range;
 
+	ros::Publisher twist_pub;
 	ros::Publisher flow_pub;
 	ros::Publisher flow_rad_pub;
 	ros::Publisher range_pub;
 	ros::Publisher temp_pub;
+
+	Eigen::Vector3d linear_velocity;
+	Eigen::Vector3d angular_velocity;
+	ftf::Covariance6d covariance;
+
+	void publish_twist(std_msgs::Header header)
+	{
+		auto twist_msg = boost::make_shared<geometry_msgs::TwistWithCovarianceStamped>();
+
+		twist_msg->header = header;
+
+		tf::vectorEigenToMsg(linear_velocity, twist_msg->twist.twist.linear);
+		tf::vectorEigenToMsg(angular_velocity, twist_msg->twist.twist.angular);
+
+		twist_msg->twist.covariance = covariance;
+
+		twist_pub.publish(twist_msg);
+	}
 
 	void handle_optical_flow(const mavlink::mavlink_message_t *msg, mavlink::common::msg::OPTICAL_FLOW &flow)
 	{
@@ -109,6 +130,9 @@ private:
 		flow_msg->ground_distance = flow.ground_distance;
 
 		flow_pub.publish(flow_msg);
+
+		// store compenstated velocities for twist message
+		linear_velocity = comp_xy;
 	}
 
 	void handle_optical_flow_rad(const mavlink::mavlink_message_t *msg, mavlink::common::msg::OPTICAL_FLOW_RAD &flow_rad)
@@ -150,6 +174,9 @@ private:
 		flow_rad_msg->quality = flow_rad.quality;
 
 		flow_rad_pub.publish(flow_rad_msg);
+
+		// store gyro readings for twist message
+		angular_velocity = int_gyro;
 
 		// Temperature
 		auto temp_msg = boost::make_shared<sensor_msgs::Temperature>();
